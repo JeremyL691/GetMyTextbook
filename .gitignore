@@ -1,0 +1,8 @@
+.DS_Store
+.cache/
+__pycache__/
+*.pyc
+.venv/
+.claude/
+output/
+0 - Start.txt
