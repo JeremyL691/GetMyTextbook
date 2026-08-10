@@ -118,6 +118,8 @@ h1.chapter-title {
     padding-bottom: 8pt;
     margin-bottom: 18pt;
     string-set: chapter-title content();
+    bookmark-level: 1;
+    bookmark-label: content();
 }
 
 h2 { font-size: 15pt; border-bottom: 1px solid #d0d7e3; padding-bottom: 4pt; }

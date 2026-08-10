@@ -466,7 +466,10 @@ def detect_site_technology(base_url: str, client: HttpClient) -> str:
     if "myst" in meta_generator or "made with myst" in html or soup.select_one(".myst-toc, nav.myst-primary-sidebar-toc, .myst-primary-sidebar-nav"):
         return "myst"
 
-    raise ValueError("Unsupported custom URL. Only MyST and GitBook textbooks are supported.")
+    if "jekyll" in meta_generator or soup.select_one("nav.site-nav, .site-nav, div.main-content"):
+        return "jekyll"
+
+    raise ValueError("Unsupported custom URL. Only MyST, GitBook and Jekyll textbooks are supported.")
 
 
 def resolve_adapter(request: ExtractionRequest, client: HttpClient | None = None) -> BaseAdapter:
@@ -489,7 +492,11 @@ def resolve_adapter(request: ExtractionRequest, client: HttpClient | None = None
         return GitBookAdapter(base_url=request.base_url)
     if detected_tech == "myst":
         return MySTAdapter(base_url=request.base_url)
-    raise ValueError("Unsupported custom URL. Only MyST and GitBook textbooks are supported.")
+    if detected_tech == "jekyll":
+        from jekyll_adapter import JekyllAdapter
+
+        return JekyllAdapter(base_url=request.base_url)
+    raise ValueError("Unsupported custom URL. Only MyST, GitBook and Jekyll textbooks are supported.")
 
 
 def get_adapter(site_id: str) -> BaseAdapter:
