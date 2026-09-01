@@ -1,33 +1,27 @@
 # GetMyTextbook
 
-> A Python web-scraping and PDF-automation pipeline that converts structured online textbooks into one offline PDF.
+A small Python tool I wrote to turn online course textbooks into a single offline PDF.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](#quick-start)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-GetMyTextbook extracts documentation-style course content, preserves its chapter structure, cleans it for print, and renders a single offline PDF. It supports **MyST**, **GitBook**, and **Jekyll** textbook sites, with built-in presets for UC Berkeley's `ds100` (Data C100) and `cs61b` (CS 61B) course materials.
+It started with Data C100: the notes live on a MyST site, and I wanted one clean PDF I could read offline and keep after the semester ended. The tool detects the site format, walks the book structure, fetches and cleans every chapter, compresses the images, and renders a single PDF. MyST, GitBook, and Jekyll sites work out of the box, with presets for Berkeley's `ds100` and `cs61b` course materials.
 
-### What this demonstrates for a Data Engineer
-
-- **Heterogeneous ingestion** — one adapter interface for MyST, GitBook, and Jekyll with format-specific discovery (book-root, sequential links, site nav) and explicit unsupported-format failure.
-- **Ordered structure discovery** — each adapter builds a deterministic chapter list so the export keeps the real reading order instead of crawling arbitrarily.
-- **Resilient fetching** — `HttpClient` reuses a `requests.Session`, retries with backoff on 429 and timeouts, and caches HTML in a SHA-256-addressed local cache for fast repeat runs.
-- **Data cleaning & rendering** — article extraction, HTML normalization, Pillow image compression (fast/balanced/high), and data-URI embedding before WeasyPrint produces a deterministic PDF.
-- **Drift validation** — `ds100 --validate` re-discovers the live TOC and diffs it against a recorded snapshot, reporting missing/extra chapters and order drift with a non-zero exit on change.
+There is no magic here. The interesting parts are that chapter order comes from the actual site navigation instead of a crawl, fetching survives rate limits with retries and backoff, and a `--validate` flag re-reads the live table of contents and diffs it against a recorded snapshot, so you notice when the course site quietly rearranges itself.
 
 ---
 
 ## Why I built this
 
-Course notes are usually optimized for browser navigation, not for offline reading or archival as one coherent document. I built GetMyTextbook to treat that conversion as a small **document-engineering pipeline** rather than a one-off browser save: identify a supported site format, discover its structure, fetch and normalize chapter content, optimize images, then produce a print-ready PDF.
+Most course notes are built for browser navigation, not for reading offline or archiving as one coherent document. I could have saved each page manually, but that gets you a folder of HTML files, not a book. I wanted the conversion to behave like a small pipeline: identify the format, discover the structure, fetch and normalize the content, optimize the images, and hand a print-ready PDF to WeasyPrint.
 
-The project deliberately targets structured textbook platforms. That constraint makes chapter ordering, content selection, and rendering behavior explicit — instead of pretending that every webpage can be exported reliably.
+The tool deliberately only handles structured documentation platforms. That constraint keeps chapter ordering, content selection, and rendering explicit. A random website or a paywalled page is out of scope and fails with a clear error instead of producing a broken export.
 
 ---
 
 ## Supported sources
 
-| Source | How it is handled |
+| Source | What happens |
 | --- | --- |
 | `ds100` preset | MyST-based Data C100 course notes (Berkeley) |
 | `cs61b` preset | GitBook-based CS 61B textbook |
@@ -35,11 +29,11 @@ The project deliberately targets structured textbook platforms. That constraint 
 | Custom GitBook URL | Format detection + sequential chapter discovery |
 | Custom Jekyll URL | Format detection + site-navigation discovery |
 
-Each successful run writes one PDF to `output/` by default. `--debug-html` can also save the merged HTML used before PDF rendering.
+Every successful run writes one PDF to `output/` by default. Use `--debug-html` if you want the merged HTML before rendering.
 
 ---
 
-## Pipeline architecture
+## How it works
 
 ```mermaid
 flowchart LR
@@ -57,17 +51,15 @@ flowchart LR
     L --> M[Offline PDF]
 ```
 
-Orchestration lives in `services.py`: it resolves an adapter, discovers chapters, fetches chapter payloads, replaces images with compressed data URIs, builds the full HTML, and calls the PDF renderer. `scraper.py` keeps cache-aware HTTP fetching with retry/backoff; `image_handler.py` maintains a separate image cache keyed by URL and compression profile.
+`services.py` is the orchestrator: it resolves an adapter, discovers chapters, fetches the payloads, swaps images for compressed data URIs, builds the full HTML, and calls the renderer. `scraper.py` owns cache-aware HTTP fetching with retry and backoff, and `image_handler.py` keeps a separate image cache keyed by URL and compression profile.
 
----
+A few details worth knowing:
 
-## Engineering highlights
-
-- **Adapter-driven format detection.** `adapters.py` identifies MyST, GitBook, or Jekyll signals (e.g. the HTML `<meta name="generator">` tag) and routes custom URLs to a format-specific adapter.
-- **Layered structure discovery.** Each adapter builds an ordered chapter list from the live site — book-root navigation for MyST, sequential links for GitBook, site navigation for Jekyll — so exports keep the real reading order.
-- **Cache-aware, resilient fetching.** `HttpClient` reuses a `requests.Session`, applies configurable timeouts and retries, backs off on rate limits (HTTP 429), and caches HTML pages in a SHA-256-addressed local cache (`cache_store.py`) so repeat runs are fast.
-- **Image-aware document rendering.** Pillow applies `fast`, `balanced`, or `high` compression profiles, keeps alpha images as PNG, converts where applicable, and embeds the compressed results as data URIs before WeasyPrint renders the final PDF.
-- **Deterministic DS100 validation.** `python3 app.py ds100 --validate` re-discovers the live table of contents and compares it against the adapter's recorded snapshot, reporting missing chapters, extra chapters, title mismatches, and ordering drift — with a non-zero exit status when differences are found.
+- **Format detection** looks for concrete signals, e.g. the `<meta name="generator">` tag, and routes custom URLs to the right adapter. Unknown formats fail loudly.
+- **Ordered discovery** is per-adapter: book-root navigation for MyST, sequential links for GitBook, site navigation for Jekyll. The export follows the reading order, not crawl order.
+- **Fetching** keeps one `requests.Session` in an `HttpClient` with configurable timeouts, retries with backoff on 429 responses and timeouts, and caches HTML pages in a SHA-256-addressed local cache so repeat runs are fast.
+- **Images** go through Pillow with `fast`, `balanced`, and `high` compression profiles, keep alpha as PNG, and get embedded as data URIs before WeasyPrint renders.
+- **Validation** (`ds100 --validate`) re-discovers the live TOC and compares it against the recorded snapshot: missing chapters, extra chapters, title mismatches, and ordering drift all get reported, and the exit code turns non-zero when something changed.
 
 ---
 
@@ -80,7 +72,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> **macOS note:** WeasyPrint needs a few Homebrew libraries, e.g. `pango` and `glib`.
+> **macOS note:** WeasyPrint needs a couple of Homebrew libraries, e.g. `pango` and `glib`.
 
 ```bash
 # Export the Data C100 book (MyST preset, cached)
@@ -96,46 +88,29 @@ python3 app.py custom --url https://example.com/book/
 python3 app.py ds100 --validate
 ```
 
-Interactive mode (`python3 app.py`) also offers a menu of all presets and options.
+Without arguments (`python3 app.py`) it opens an interactive menu with all presets and options.
 
-### Useful options
-
-| Flag | What it does |
-| --- | --- |
-| `--output PATH` | Where to write the final PDF |
-| `--debug-html` | Save the merged HTML before PDF rendering |
-| `--image-profile fast\|balanced\|high` | Image compression profile |
-| `--refresh` | Force-refresh cached preset content |
-| `--validate` | Deterministic TOC drift check (`ds100` only) |
-| `--skip-frontmatter` | Omit frontmatter pages where supported |
-
-Custom URL mode always refreshes chapter HTML so it pulls the latest live content; built-in presets use the cache by default for fast repeat runs.
+Useful flags: `--output PATH` chooses the destination, `--debug-html` saves the merged HTML, `--image-profile fast|balanced|high` picks the compression profile, `--refresh` forces a refresh of cached presets, `--validate` runs the TOC drift check (ds100 only), and `--skip-frontmatter` omits frontmatter pages where supported. Custom URL mode always refreshes chapter HTML; built-in presets use the cache by default.
 
 ---
 
-## Repository map
+## Repository layout
 
-| Module | Responsibility |
-| --- | --- |
-| `app.py` | Interactive menu, CLI entry points, `--validate` wiring |
-| `main.py` / `main_pdf.py` | Thin process entry points |
-| `services.py` | Orchestration: adapter resolution, discovery, extraction, merge, validation |
-| `adapters.py` | Site-technology detection + MyST / GitBook adapter logic |
-| `jekyll_adapter.py` | Jekyll-specific adapter |
-| `scraper.py` | HTTP client: session reuse, retries, backoff, HTML cache |
-| `html_builder.py` | HTML merging and cleanup for print |
-| `image_handler.py` | Image fetch, Pillow compression profiles, data-URI embedding |
-| `pdf_renderer.py` | WeasyPrint PDF generation |
-| `cache_store.py` | SHA-256-addressed HTML / image caches |
-| `config.py` | Defaults and tuning knobs |
-| `models.py` | Request / option / report models |
-
----
-
-## Limitations
-
-GetMyTextbook is built for **structured documentation platforms** (MyST, GitBook, Jekyll). Arbitrary websites and paywalled content are intentionally out of scope — if the site format isn't detected, the tool stops with a clear error instead of producing a broken export.
+```text
+app.py              interactive menu, CLI entry points, --validate wiring
+main.py, main_pdf.py  thin process entry points
+services.py         orchestration: adapter resolution, discovery, extraction, merge, validation
+adapters.py         site-technology detection + MyST / GitBook adapter logic
+jekyll_adapter.py   Jekyll-specific adapter
+scraper.py          HTTP client: session reuse, retries, backoff, HTML cache
+html_builder.py     HTML merging and cleanup for print
+image_handler.py    image fetch, Pillow compression profiles, data-URI embedding
+pdf_renderer.py     WeasyPrint PDF generation
+cache_store.py      SHA-256-addressed HTML / image caches
+config.py           defaults and tuning knobs
+models.py           request / option / report models
+```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
