@@ -7,6 +7,14 @@
 
 GetMyTextbook extracts documentation-style course content, preserves its chapter structure, cleans it for print, and renders a single offline PDF. It supports **MyST**, **GitBook**, and **Jekyll** textbook sites, with built-in presets for UC Berkeley's `ds100` (Data C100) and `cs61b` (CS 61B) course materials.
 
+### What this demonstrates for a Data Engineer
+
+- **Heterogeneous ingestion** — one adapter interface for MyST, GitBook, and Jekyll with format-specific discovery (book-root, sequential links, site nav) and explicit unsupported-format failure.
+- **Ordered structure discovery** — each adapter builds a deterministic chapter list so the export keeps the real reading order instead of crawling arbitrarily.
+- **Resilient fetching** — `HttpClient` reuses a `requests.Session`, retries with backoff on 429 and timeouts, and caches HTML in a SHA-256-addressed local cache for fast repeat runs.
+- **Data cleaning & rendering** — article extraction, HTML normalization, Pillow image compression (fast/balanced/high), and data-URI embedding before WeasyPrint produces a deterministic PDF.
+- **Drift validation** — `ds100 --validate` re-discovers the live TOC and diffs it against a recorded snapshot, reporting missing/extra chapters and order drift with a non-zero exit on change.
+
 ---
 
 ## Why I built this
